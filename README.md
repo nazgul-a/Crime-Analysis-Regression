@@ -25,7 +25,7 @@ It applies multiple regression techniques to evaluate which factors contribute m
 - Communicating statistical results  
 
 ## 📄 Full Analysis  
-See the complete report with code and plots here: [analysis.md](analysis.md).  
+See the complete report with code and plots here: [analysis.md](Crime-and-Lunatics-Analysis.md).  
 
 
 
