@@ -1,0 +1,218 @@
+---
+title: "Analyzing Crime Rates and Punishment Variables in U.S. States"
+author: "Nazgul Altynbekova"
+output:
+  github_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### 1
+
+Criminologists are interested in the effect of punishment regimes on crime rates. The dataset CrimeandPunishment.csv has information on the Crime rate in 47 states of the USA, and certain other variables for each state.   A description of the  variables is given in a table at the end of this report. 
+
+
+```{r}
+CAP <- read.csv("CrimeAndPunishment.csv",header=TRUE)
+attach(CAP)
+cap.lm = lm(Crime ~ ., data = CAP)
+summary(cap.lm)
+```
+
+The model is definitely overfitting since only 5 out f 15 variables are more or less significant. Hence the RSE is relatively huge, even though the R-squared is quite acceptable, as expected considering big number of covariates.
+
+#### Calculating VIFs 
+
+```{r}
+library(car)
+vif(cap.lm)
+```
+We got 2 variables (Police60pc and Police59pc) with large value of VIFs over 100, and one variable with VIF above 10 (Wealth), which clearly indicates that we deal with multicollinearity.
+
+#### Performing a backwards elimination starting with the model
+
+```{r}
+cap.stepback = step(cap.lm, scope = ~1, data = CAP, direction = "backward")
+summary(cap.stepback)
+```
+
+```{r}
+cap.stepback2 <- update(cap.stepback, . ~ . - Mper100F)
+summary(cap.stepback2)
+```
+
+Although RSE for the second model slightly increased compared to the fierst one (19.98 vs. 19.56) and R-squared decreased (0.7737 vs. 0.7888), the overall p-value of this model shows a bit of improvement of the model in general (8.906e-11 vs. 1.165e-10).
+
+```{r, eval=FALSE, echo=TRUE }
+
+pred_r_squared <- function(linear.model) {
+    #' Use anova() to get the sum of squares for the linear model
+    lm.anova <- anova(linear.model)
+    #' Calculate the total sum of squares
+    tss <- sum(lm.anova$"Sum Sq")
+    # Calculate the predictive R^2
+    pred.r.squared <- 1 - PRESS(linear.model)/(tss)
+    return(pred.r.squared)
+}
+
+pred_r_squared(cap.stepback)
+pred_r_squared(cap.stepback2)
+```
+
+ First model gives slightly bigger Predicted R-square, which means that the amount of variation in new data would be explained better by model cap.stepback compared to cap.stepback2. Although its overall p-value is smaller, I would suggest that the first model works better since the RSE and R-squared are better here, plus the predicted R-squared showed the pivotal evidence.
+
+
+### 2 
+
+Tradition states that some people (so-called “lunatics”) are more likely to become mentally unstable at the time of the full moon.  To examine whether there was any truth to this tradition, a researcher examined the admission rates to the emergency room of a Virginia mental health clinic before, during and after the 12 full moons from August 1971 to July 1972.  
+
+#### Admissions against time
+
+```{r}
+luna <- read.csv("Lunatics.csv",header=TRUE)
+attach(luna)
+head(luna)
+```
+
+
+```{r}
+#luna.lm = lm(Admissions ~ Time, data = luna)
+#summary(luna.lm)
+plot(Admissions ~ Time, pch = rep(c(1,2,3), 12), col = rep(c(1,2,3), 12), data = luna)
+```
+
+```{r}
+luna.lm = lm(Admissions ~ Time + During, data = luna)
+summary(luna.lm)
+```
+
+The mean number of Admissions before and after the full moon is 5.8. The effect of Time on the number of Admissions is highly significant and shows a positive trend, which means that the number of Admissions goes up by 0.87 every unit of Time (every month). The effect of the full moon is also significant with p-value of 0.03, and the mean number of Admissions increase by 2.2 During the full moon.
+
+#### Durbin-Watson test for autocorrelation
+
+```{r}
+library(car)
+dwt(luna.lm, alternative = "positive")
+```
+
+The p-value of Durbin-Watson test is significant, therefore wee reject the null hypothesis and may conclude that residuals are positively autocorrelated. 
+
+
+```{r}
+library(nlme)
+luna.gls <- gls(Admissions ~ Time + During, correlation = corAR1(), data = luna)
+summary(luna.gls)
+```
+The estimated first-order autocorrelation coefficient (phi) = 0.3095481. Time and During are still significant and their p-values got even smaller, which supports the improvement to the gls model.
+ 
+
+```{r}
+acf(residuals(luna.gls, type = "n"))
+```
+
+The acf plot demonstrates that the autocorrelation has been adequately dealt with since all the lags (except the zero, of course) are in the confidence band. Lag-six and lag-9 are seem to cross/almost cross the line, but I don't see any other obvious solution yet, so I guess we could keep this model as the best one. 
+
+
+### 3
+```{r}
+head(CAP)
+```
+
+Imagine a certain Politician,  *A*, sees the possibility of gaining votes by being tough on crime.    Politician *A*  claims that there was a 30\% reduction in crime rate if the probability of imprisonment  in a state exceeded 0.05.  
+
+**1** Suppose a political opponent claims the drop isn't statistically significant. We construct a dummy variable *HighProb*  for ProbPrison>0.05 and, using a t-test or otherwise, test the hypothesis that the mean crime rate is the same for states where ProbPrison$>0.05$ vs  ProbPrison $\le 0.05$.
+
+```{r}
+library(dplyr)
+CAP |> 
+  mutate(HighProb = ProbPrison > 0.05) -> CAP
+
+t.test(CAP$Crime[CAP$HighProb == 1], CAP$Crime[CAP$HighProb == 0])
+```
+We got a pretty significant p-value of 0.0004 in t-test, which indicates that tthe mean crime rate between states with ProbPrison greater and smaller than 0.05 is not the same.
+
+
+**2** Suppose another opposing politician, *B*, claims that  *A*  was incorrect because Crime tended to be lower in the South anyway, for a variety of reasons, and that the difference between South and non-South explained away any relationship to ProbPrison. 
+
+
+```{r}
+t.test(CAP$Crime[CAP$South == 1], CAP$Crime[CAP$South == 0])
+```
+P-value is too big, the difference in means is not significant, politician B is wrong : ))
+
+Plotting the Crime rate against the predictor ProbPrison, using different colours and symbols for states in the South versus not in the South. 
+
+```{r}
+plot(Crime ~ ProbPrison, pch = South, col = factor(South))
+```
+
+
+Despite Welch test's result, plot with different colors for Southern and Non-Southern states clearly shows the tendecy of Southern states having lower rate of Crime. However, it is most likely explained by the higher rate of ProbPrison (over 0.4), which reinforces Politician A's statement. Both policians opinions are explained by the same issue/solution. 
+
+**3** A different politician, *C*, claims that *A*'s p-value is invalid because *A* chose a cutoff (ProbPrison> 0.05) to best suit his  argument, rather than using a number chosen *a priori*. *A* counter-argued that he was letting the data speak for itself.   
+ 
+```{r}
+nl <- nls(Crime ~ b0 + b1*exp(1000*(ProbPrison - k)) / (1 + exp(1000*(ProbPrison - k))), start = list(b0 = 120, b1 = -60, k = 0.05))
+summary(nl)
+plot(Crime ~ ProbPrison)
+points(predict(nl) ~ ProbPrison, pch=2, col=2)
+``` 
+
+Using the coefficient estimate and standard error for *k*, we calculate a  95% confidence interval for *k*. Is Politician *A*'s chosen cutoff of 0.05  consistent with "letting the data speak for itself"? 
+```{r}
+estimate = summary(nl)$coefficients[3]
+lower = estimate + qt(0.025, df = 47 - 3)*0.002545
+upper = estimate + qt(0.975, df = 47 - 3)*0.002545
+cbind(lower, estimate, upper)
+```
+
+Now we see, that data really did speak for itself and said 0.05. Politician A's choice of cutoff of 0.05 is pretty justified.
+
+**4** Yet another  Politician, *D*,  states that *A*'s argument was invalid because  some of the states have very large populations and some  small populations,  and *A* was not taking that fact into account.  
+
+
+```{r}
+plot(Crime ~ ProbPrison, pch = South, col = factor(South), cex=sqrt(Population/10))
+```
+
+States with bigger population tend to have higher Crime rate and lower ProbPrison rate, which seem kind of explanatory and connected
+
+```{r}
+CAP.wls = lm(Crime ~ factor(South) + CAP$HighProb, weights = Population/10)
+summary(CAP.wls)
+```
+Crime is still significantly related to the indicator variable for HighProb after adjusting for the weight of Population variable, which proves that Politician A's suggestion might actually work despite the Politician D's objection.
+
+Also, the South is not significant anymore. Probably, the earlier assumption about South and HighProb being linearly related proves itself here. The effect of South is blurred because HighProb explains for both of them.
+
+
+
+
+ Variable	|   	Description
+ ---|---
+$\enspace$ | **Demographic variables**
+	yMalepc |		percentage of young males aged 14–24 in total state population
+	South	|	indicator variable for a southern state 
+	Mper100F	|	number of males per 100 females 
+	Population	|	state population in 1960 in hundred thousands
+	NonWhitepc |	percentage of nonwhites in the population 
+	$\enspace$ | **Socioeconomic variables**
+	Education	|	mean years of schooling of the population aged 25 years or over
+	yLabourF	|	labour force participation rate of young urban males aged 14–24
+	yUnemplmt	| 	unemployment rate of young urban males 14–24 
+	Unemplmt3	|	unemployment rate of urban males 35–39 
+	Wealth	|	wealth: median value of transferable assets or family income
+	Inequality	|	income inequality: percentage of families earning below half the median income
+$\enspace$ | **Policing variables** 
+	Police60pc |		per capita expenditure on police protection in 1960 
+	Police59pc	|	per capita expenditure on police protection in 1959 
+$\enspace$ | **Imprisonment variables** 
+	ProbPrison |		probability of imprisonment: ratio of number of commitments to number of offenses
+	TimeinPrison |		average time in months served by offenders in state prisons before their first release
+$\enspace$ | **Response variable**
+	Crime	|	crime rate: number of offenses per 1,000,000 population in 1960
+
